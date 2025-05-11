@@ -79,7 +79,6 @@ local function pathfindTeleport(targetPosition)
     -- Calculate path
     local path = PathfindingService:CreatePath({
         AgentRadius = humanoid.HipHeight,
-        AgentHeight = humanoid.Height,
         AgentCanJump = true,
         WaypointSpacing = 4
     })
