@@ -87,42 +87,37 @@ local function tweenTeleport(targetCFrame)
         debugPrint("Tween failed: No character or HRP")
         return false
     end
-    
+
     local startCFrame = humanoidRootPart.CFrame
     local startTime = tick()
-    
-    -- Create and play tween
-    local tween = TweenService:Create(
-        humanoidRootPart,
-        TweenInfo.new(
-            TELEPORT_DURATION,
-            Enum.EasingStyle.Quad,
-            Enum.EasingDirection.Out
-        ),
-        {CFrame = targetCFrame}
-    )
-    
-    tween:Play()
-    
-    -- Wait for completion with checks
-    while tick() - startTime < TELEPORT_DURATION do
+    local endTime = startTime + TELEPORT_DURATION
+
+    while tick() < endTime do
         if not character or not humanoidRootPart then
-            tween:Cancel()
-            debugPrint("Tween cancelled: Character changed")
+            debugPrint("Tween interrupted: Character lost")
             return false
         end
+
+        local now = tick()
+        local alpha = math.clamp((now - startTime) / TELEPORT_DURATION, 0, 1)
+
+        local interpolated = startCFrame:Lerp(targetCFrame, alpha)
+        humanoidRootPart.CFrame = interpolated
+
         RunService.Heartbeat:Wait()
     end
-    
-    -- Final position correction
+
+    -- Final snap to ensure precision
     if character and humanoidRootPart then
         humanoidRootPart.CFrame = targetCFrame
-        debugPrint("Tween completed successfully")
+        debugPrint("Manual tween teleport completed successfully")
         return true
     end
-    
+
     return false
 end
+
+
 local function pathfindTeleport(targetPosition)
     if not character or not humanoidRootPart then
         debugPrint("Pathfind failed: Missing character components")
