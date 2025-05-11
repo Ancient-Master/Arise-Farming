@@ -123,14 +123,12 @@ local function tweenTeleport(targetCFrame)
     
     return false
 end
-
 local function pathfindTeleport(targetPosition)
     if not character or not humanoidRootPart then
         debugPrint("Pathfind failed: Missing character components")
         return false
     end
 
-    -- Create path
     local path = PathfindingService:CreatePath({
         AgentRadius = humanoid.HipHeight,
         AgentHeight = 5,
@@ -138,28 +136,10 @@ local function pathfindTeleport(targetPosition)
         WaypointSpacing = 3,
     })
 
-    -- Compute path with timeout
-    local pathSuccess, pathStatus
-    local computeThread = coroutine.create(function()
-        path:ComputeAsync(humanoidRootPart.Position, targetPosition)
-    end)
+    path:ComputeAsync(humanoidRootPart.Position, targetPosition)
 
-    local startComputeTime = tick()
-    coroutine.resume(computeThread)
-
-    while coroutine.status(computeThread) ~= "dead" and tick() - startComputeTime < PATHFINDING_TIMEOUT do
-        RunService.Heartbeat:Wait()
-    end
-
-    if coroutine.status(computeThread) ~= "dead" then
-        debugPrint("Pathfinding timed out")
-        return false
-    end
-
-    pathStatus = path.Status
-
-    if pathStatus ~= Enum.PathStatus.Success then
-        debugPrint("Pathfinding failed with status:", tostring(pathStatus))
+    if path.Status ~= Enum.PathStatus.Success then
+        debugPrint("Pathfinding failed with status:", tostring(path.Status))
         return false
     end
 
@@ -169,37 +149,58 @@ local function pathfindTeleport(targetPosition)
         return false
     end
 
-    -- Compute total distance
+    -- Precompute timing
     local totalDistance = 0
+    local segments = {}
     for i = 2, #waypoints do
-        totalDistance += (waypoints[i].Position - waypoints[i - 1].Position).Magnitude
+        local dist = (waypoints[i].Position - waypoints[i - 1].Position).Magnitude
+        table.insert(segments, {
+            from = waypoints[i - 1].Position,
+            to = waypoints[i].Position,
+            distance = dist
+        })
+        totalDistance += dist
     end
 
-    if totalDistance <= 0 then
+    if totalDistance == 0 then
         debugPrint("Zero distance path")
         return false
     end
 
-    -- Step teleport along waypoints within TELEPORT_DURATION
     local startTime = tick()
+    local endTime = startTime + TELEPORT_DURATION
+    local currentSegmentIndex = 1
+    local currentSegment = segments[1]
+    local segmentProgress = 0
 
-    for i = 2, #waypoints do
-        if not character or not humanoidRootPart then
-            debugPrint("Path teleport cancelled: Character changed")
-            return false
+    while tick() < endTime do
+        local now = tick()
+        local elapsed = now - startTime
+        local t = elapsed / TELEPORT_DURATION
+
+        -- Compute how far along total distance we should be
+        local targetDist = t * totalDistance
+        local traversedDist = 0
+
+        -- Find correct segment
+        for i, seg in ipairs(segments) do
+            if traversedDist + seg.distance >= targetDist then
+                currentSegmentIndex = i
+                currentSegment = seg
+                segmentProgress = (targetDist - traversedDist) / seg.distance
+                break
+            else
+                traversedDist += seg.distance
+            end
         end
 
-        local prevPos = waypoints[i - 1].Position
-        local currPos = waypoints[i].Position
-        local segmentDistance = (currPos - prevPos).Magnitude
-        local segmentTime = (segmentDistance / totalDistance) * TELEPORT_DURATION
-
-        humanoidRootPart.CFrame = CFrame.new(currPos + Vector3.new(0, HEIGHT_OFFSET, 0))
-
-        local segmentStart = tick()
-        while tick() - segmentStart < segmentTime do
-            RunService.Heartbeat:Wait()
+        -- Lerp position
+        if currentSegment then
+            local pos = currentSegment.from:Lerp(currentSegment.to, segmentProgress)
+            humanoidRootPart.CFrame = CFrame.new(pos + Vector3.new(0, HEIGHT_OFFSET, 0))
         end
+
+        RunService.Heartbeat:Wait()
     end
 
     -- Final adjustment
@@ -211,6 +212,7 @@ local function pathfindTeleport(targetPosition)
 
     return false
 end
+
 
 
 -- Main teleport function with retries
