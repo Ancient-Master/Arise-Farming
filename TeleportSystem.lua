@@ -124,96 +124,94 @@ local function tweenTeleport(targetCFrame)
     return false
 end
 
--- Enhanced pathfinding teleport
 local function pathfindTeleport(targetPosition)
-    if not character or not humanoid or not humanoidRootPart then
+    if not character or not humanoidRootPart then
         debugPrint("Pathfind failed: Missing character components")
         return false
     end
-    
-    -- Create path with better parameters
+
+    -- Create path
     local path = PathfindingService:CreatePath({
         AgentRadius = humanoid.HipHeight,
         AgentHeight = 5,
         AgentCanJump = true,
         WaypointSpacing = 3,
-        CostModifiers = {
-            WaterCost = 50,  -- Avoid water
-            LavaCost = 100  -- Really avoid lava
-        }
     })
-    
+
     -- Compute path with timeout
     local pathSuccess, pathStatus
     local computeThread = coroutine.create(function()
         path:ComputeAsync(humanoidRootPart.Position, targetPosition)
     end)
-    
+
     local startComputeTime = tick()
     coroutine.resume(computeThread)
-    
+
     while coroutine.status(computeThread) ~= "dead" and tick() - startComputeTime < PATHFINDING_TIMEOUT do
         RunService.Heartbeat:Wait()
     end
-    
+
     if coroutine.status(computeThread) ~= "dead" then
         debugPrint("Pathfinding timed out")
         return false
     end
-    
+
     pathStatus = path.Status
-    
+
     if pathStatus ~= Enum.PathStatus.Success then
         debugPrint("Pathfinding failed with status:", tostring(pathStatus))
         return false
     end
-    
+
     local waypoints = path:GetWaypoints()
     if #waypoints < 2 then
         debugPrint("Not enough waypoints")
         return false
     end
-    
-    -- Calculate total distance
+
+    -- Compute total distance
     local totalDistance = 0
     for i = 2, #waypoints do
-        totalDistance += (waypoints[i].Position - waypoints[i-1].Position).Magnitude
+        totalDistance += (waypoints[i].Position - waypoints[i - 1].Position).Magnitude
     end
-    
+
     if totalDistance <= 0 then
         debugPrint("Zero distance path")
         return false
     end
-    
-    -- Follow path with timing
+
+    -- Step teleport along waypoints within TELEPORT_DURATION
     local startTime = tick()
-    
+
     for i = 2, #waypoints do
-        local waypoint = waypoints[i]
-        local segmentDistance = (waypoint.Position - waypoints[i-1].Position).Magnitude
+        if not character or not humanoidRootPart then
+            debugPrint("Path teleport cancelled: Character changed")
+            return false
+        end
+
+        local prevPos = waypoints[i - 1].Position
+        local currPos = waypoints[i].Position
+        local segmentDistance = (currPos - prevPos).Magnitude
         local segmentTime = (segmentDistance / totalDistance) * TELEPORT_DURATION
-        
-        humanoid:MoveTo(waypoint.Position)
-        
+
+        humanoidRootPart.CFrame = CFrame.new(currPos + Vector3.new(0, HEIGHT_OFFSET, 0))
+
         local segmentStart = tick()
         while tick() - segmentStart < segmentTime do
-            if not character or not humanoidRootPart then
-                debugPrint("Pathfind cancelled: Character changed")
-                return false
-            end
             RunService.Heartbeat:Wait()
         end
     end
-    
-    -- Final position adjustment
+
+    -- Final adjustment
     if character and humanoidRootPart then
-        humanoidRootPart.CFrame = CFrame.new(targetPosition)
-        debugPrint("Pathfind completed successfully")
+        humanoidRootPart.CFrame = CFrame.new(targetPosition + Vector3.new(0, HEIGHT_OFFSET, 0))
+        debugPrint("Path teleport completed successfully")
         return true
     end
-    
+
     return false
 end
+
 
 -- Main teleport function with retries
 function TeleportSystem.teleport(targetPosition, maxRetries)
