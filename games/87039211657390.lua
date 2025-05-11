@@ -23,5 +23,3 @@ local test = vape.Categories.Combat:CreateModule({
     Tooltip = 'This is a test module'
 })
 
-local kills = sessioninfo:AddItem('Kills', 0, function(val) return val end, true)
-kills:Increment()
