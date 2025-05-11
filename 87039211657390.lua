@@ -25,5 +25,3 @@ local test = vape.Categories.Combat:CreateModule({
 
 local kills = sessioninfo:AddItem('Kills', 0, function(val) return val end, true)
 kills:Increment()
-
-vape:Init()
