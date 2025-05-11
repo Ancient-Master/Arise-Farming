@@ -30,14 +30,14 @@ local function initializeCharacter()
     character = localPlayer.Character or localPlayer.CharacterAdded:Wait()
     humanoid = character:WaitForChild("Humanoid")
     humanoidRootPart = character:WaitForChild("HumanoidRootPart")
-    
+
     localPlayer.CharacterAdded:Connect(function(newChar)
         character = newChar
         humanoid = newChar:WaitForChild("Humanoid")
         humanoidRootPart = newChar:WaitForChild("HumanoidRootPart")
         debugPrint("Character changed, updated references")
     end)
-    
+
     debugPrint("Character initialized")
 end
 
@@ -51,74 +51,80 @@ local function isPositionSafe(position)
     local raycastParams = RaycastParams.new()
     raycastParams.FilterDescendantsInstances = {character}
     raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
-    
+
     local raycastResult = workspace:Raycast(rayOrigin, rayDirection, raycastParams)
-    
+
     if not raycastResult then
         debugPrint("Position unsafe: No surface detected")
         return false
     end
-    
+
     local unsafeMaterials = {
         Enum.Material.Water,
         Enum.Material.Air,
         Enum.Material.Ice
     }
-    
+
     for _, mat in ipairs(unsafeMaterials) do
         if raycastResult.Material == mat then
             debugPrint("Position unsafe: Bad material ("..tostring(mat)..")")
             return false
         end
     end
-    
-    -- Additional check for steep slopes
-    if raycastResult.Normal.Y < 0.7 then  -- About 45 degree slope
+
+    if raycastResult.Normal.Y < 0.7 then
         debugPrint("Position unsafe: Too steep (normal Y:", raycastResult.Normal.Y)
         return false
     end
-    
+
     return true
 end
 
--- Improved tween teleport with velocity preservation
-local function tweenTeleport(targetCFrame)
+-- Tween teleport with duration
+local function tweenTeleport(targetCFrame, duration)
+    duration = duration or TELEPORT_DURATION
+
     if not character or not humanoidRootPart then
         debugPrint("Tween failed: No character or HRP")
         return false
     end
 
-    local startCFrame = humanoidRootPart.CFrame
     local startTime = tick()
-    local endTime = startTime + TELEPORT_DURATION
 
-    while tick() < endTime do
+    local tween = TweenService:Create(
+        humanoidRootPart,
+        TweenInfo.new(
+            duration,
+            Enum.EasingStyle.Quad,
+            Enum.EasingDirection.Out
+        ),
+        {CFrame = targetCFrame}
+    )
+
+    tween:Play()
+
+    while tick() - startTime < duration do
         if not character or not humanoidRootPart then
-            debugPrint("Tween interrupted: Character lost")
+            tween:Cancel()
+            debugPrint("Tween cancelled: Character changed")
             return false
         end
-
-        local now = tick()
-        local alpha = math.clamp((now - startTime) / TELEPORT_DURATION, 0, 1)
-
-        local interpolated = startCFrame:Lerp(targetCFrame, alpha)
-        humanoidRootPart.CFrame = interpolated
-
         RunService.Heartbeat:Wait()
     end
 
-    -- Final snap to ensure precision
     if character and humanoidRootPart then
         humanoidRootPart.CFrame = targetCFrame
-        debugPrint("Manual tween teleport completed successfully")
+        debugPrint("Tween completed successfully")
         return true
     end
 
     return false
 end
 
+-- Pathfind teleport with duration
+local function pathfindTeleport(targetPosition, duration)
+    duration = duration or TELEPORT_DURATION
 
-local function pathfindTeleport(targetPosition)
     if not character or not humanoidRootPart then
         debugPrint("Pathfind failed: Missing character components")
         return false
@@ -144,7 +150,6 @@ local function pathfindTeleport(targetPosition)
         return false
     end
 
-    -- Precompute timing
     local totalDistance = 0
     local segments = {}
     for i = 2, #waypoints do
@@ -163,7 +168,7 @@ local function pathfindTeleport(targetPosition)
     end
 
     local startTime = tick()
-    local endTime = startTime + TELEPORT_DURATION
+    local endTime = startTime + duration
     local currentSegmentIndex = 1
     local currentSegment = segments[1]
     local segmentProgress = 0
@@ -171,13 +176,11 @@ local function pathfindTeleport(targetPosition)
     while tick() < endTime do
         local now = tick()
         local elapsed = now - startTime
-        local t = elapsed / TELEPORT_DURATION
+        local t = elapsed / duration
 
-        -- Compute how far along total distance we should be
         local targetDist = t * totalDistance
         local traversedDist = 0
 
-        -- Find correct segment
         for i, seg in ipairs(segments) do
             if traversedDist + seg.distance >= targetDist then
                 currentSegmentIndex = i
@@ -189,7 +192,6 @@ local function pathfindTeleport(targetPosition)
             end
         end
 
-        -- Lerp position
         if currentSegment then
             local pos = currentSegment.from:Lerp(currentSegment.to, segmentProgress)
             humanoidRootPart.CFrame = CFrame.new(pos + Vector3.new(0, HEIGHT_OFFSET, 0))
@@ -198,7 +200,6 @@ local function pathfindTeleport(targetPosition)
         RunService.Heartbeat:Wait()
     end
 
-    -- Final adjustment
     if character and humanoidRootPart then
         humanoidRootPart.CFrame = CFrame.new(targetPosition + Vector3.new(0, HEIGHT_OFFSET, 0))
         debugPrint("Path teleport completed successfully")
@@ -208,61 +209,53 @@ local function pathfindTeleport(targetPosition)
     return false
 end
 
-
-
--- Main teleport function with retries
-function TeleportSystem.teleport(targetPosition, maxRetries)
+-- Main teleport function with retries and custom duration
+function TeleportSystem.teleport(targetPosition, maxRetries, duration)
     maxRetries = maxRetries or MAX_TELEPORT_RETRIES
-    
+    duration = duration or TELEPORT_DURATION
+
     if not targetPosition then
         debugPrint("No target position provided")
         return false
     end
-    
-    -- Wait for character to be ready if needed
+
     if not character or not humanoidRootPart then
         debugPrint("Waiting for character...")
         initializeCharacter()
     end
-    
-    -- Adjust target position
+
     local adjustedPosition = Vector3.new(
         targetPosition.X,
         targetPosition.Y + HEIGHT_OFFSET,
         targetPosition.Z
     )
-    
+
     local targetCFrame = CFrame.new(adjustedPosition)
-    
-    -- Check position safety
+
     if not isPositionSafe(targetPosition) then
         debugPrint("Target position is not safe")
         return false
     end
-    
-    -- Try teleport with retries
+
     local success = false
     local attempts = 0
-    
+
     while not success and attempts < maxRetries do
         attempts += 1
         debugPrint("Attempt", attempts, "of", maxRetries)
-        
-        -- First try pathfinding
-        success = pathfindTeleport(adjustedPosition)
-        
-        -- Fall back to tween if pathfinding fails
+
+        success = pathfindTeleport(adjustedPosition, duration)
+
         if not success then
             debugPrint("Pathfinding failed, trying tween...")
-            success = tweenTeleport(targetCFrame)
+            success = tweenTeleport(targetCFrame, duration)
         end
-        
-        -- Small delay between attempts
+
         if not success and attempts < maxRetries then
             task.wait(0.5)
         end
     end
-    
+
     debugPrint(success and "Teleport succeeded" or "Teleport failed after all attempts")
     return success
 end
