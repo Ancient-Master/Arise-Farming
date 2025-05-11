@@ -79,6 +79,7 @@ local function pathfindTeleport(targetPosition)
     -- Calculate path
     local path = PathfindingService:CreatePath({
         AgentRadius = humanoid.HipHeight,
+        AgentHeight = 5, -- Standard humanoid height
         AgentCanJump = true,
         WaypointSpacing = 4
     })
@@ -133,6 +134,11 @@ end
 -- Main teleport function
 function TeleportSystem.teleport(targetPosition)
     if not character or not targetPosition then return false end
+    
+    -- Check if position is safe
+    if not isPositionSafe(targetPosition) then
+        return false
+    end
     
     -- Adjust target position with height offset
     local adjustedPosition = Vector3.new(
