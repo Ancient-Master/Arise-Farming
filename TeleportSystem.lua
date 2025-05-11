@@ -11,6 +11,7 @@ local TELEPORT_DURATION = 1.5
 local PATHFINDING_TIMEOUT = 1
 local HEIGHT_OFFSET = 3
 local MAX_TELEPORT_RETRIES = 3
+local MAX_PATHFIND_DISTANCE = 1024 -- Maximum safe distance for pathfinding
 
 -- Local references
 local localPlayer = Players.LocalPlayer
@@ -41,7 +42,6 @@ local function initializeCharacter()
     debugPrint("Character initialized")
 end
 
--- Initialize immediately
 initializeCharacter()
 
 -- Enhanced position safety check
@@ -80,7 +80,6 @@ local function isPositionSafe(position)
     return true
 end
 
--- Tween teleport with duration
 local function tweenTeleport(targetCFrame, duration)
     duration = duration or TELEPORT_DURATION
 
@@ -121,7 +120,6 @@ local function tweenTeleport(targetCFrame, duration)
     return false
 end
 
--- Pathfind teleport with duration
 local function pathfindTeleport(targetPosition, duration)
     duration = duration or TELEPORT_DURATION
 
@@ -169,7 +167,6 @@ local function pathfindTeleport(targetPosition, duration)
 
     local startTime = tick()
     local endTime = startTime + duration
-    local currentSegmentIndex = 1
     local currentSegment = segments[1]
     local segmentProgress = 0
 
@@ -183,7 +180,6 @@ local function pathfindTeleport(targetPosition, duration)
 
         for i, seg in ipairs(segments) do
             if traversedDist + seg.distance >= targetDist then
-                currentSegmentIndex = i
                 currentSegment = seg
                 segmentProgress = (targetDist - traversedDist) / seg.distance
                 break
@@ -209,7 +205,7 @@ local function pathfindTeleport(targetPosition, duration)
     return false
 end
 
--- Main teleport function with retries and custom duration
+-- Main teleport function with retries and fallback
 function TeleportSystem.teleport(targetPosition, maxRetries, duration)
     maxRetries = maxRetries or MAX_TELEPORT_RETRIES
     duration = duration or TELEPORT_DURATION
@@ -224,17 +220,18 @@ function TeleportSystem.teleport(targetPosition, maxRetries, duration)
         initializeCharacter()
     end
 
-    if not isPositionSafe(targetPosition) then
-        debugPrint("Target position is not safe")
-        return false
-    end
-
     local adjustedPosition = Vector3.new(
         targetPosition.X,
         targetPosition.Y + HEIGHT_OFFSET,
         targetPosition.Z
     )
+
     local targetCFrame = CFrame.new(adjustedPosition)
+
+    if not isPositionSafe(targetPosition) then
+        debugPrint("Target position is not safe")
+        return false
+    end
 
     local success = false
     local attempts = 0
@@ -243,12 +240,15 @@ function TeleportSystem.teleport(targetPosition, maxRetries, duration)
         attempts += 1
         debugPrint("Attempt", attempts, "of", maxRetries)
 
-        -- Use unmodified position for pathfinding
-        success = pathfindTeleport(targetPosition, duration)
+        local distance = (humanoidRootPart.Position - targetPosition).Magnitude
+        if distance <= MAX_PATHFIND_DISTANCE then
+            success = pathfindTeleport(adjustedPosition, duration)
+        else
+            debugPrint("Target too far for pathfinding, using tween directly")
+        end
 
         if not success then
-            debugPrint("Pathfinding failed, trying tween...")
-            -- Use adjusted position for tweening
+            debugPrint("Pathfinding failed or skipped, trying tween...")
             success = tweenTeleport(targetCFrame, duration)
         end
 
@@ -261,7 +261,6 @@ function TeleportSystem.teleport(targetPosition, maxRetries, duration)
     return success
 end
 
--- Public function to toggle debug mode
 function TeleportSystem.setDebugMode(enabled)
     debugMode = enabled
 end
