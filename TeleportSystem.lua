@@ -224,18 +224,17 @@ function TeleportSystem.teleport(targetPosition, maxRetries, duration)
         initializeCharacter()
     end
 
+    if not isPositionSafe(targetPosition) then
+        debugPrint("Target position is not safe")
+        return false
+    end
+
     local adjustedPosition = Vector3.new(
         targetPosition.X,
         targetPosition.Y + HEIGHT_OFFSET,
         targetPosition.Z
     )
-
     local targetCFrame = CFrame.new(adjustedPosition)
-
-    if not isPositionSafe(targetPosition) then
-        debugPrint("Target position is not safe")
-        return false
-    end
 
     local success = false
     local attempts = 0
@@ -244,10 +243,12 @@ function TeleportSystem.teleport(targetPosition, maxRetries, duration)
         attempts += 1
         debugPrint("Attempt", attempts, "of", maxRetries)
 
-        success = pathfindTeleport(adjustedPosition, duration)
+        -- Use unmodified position for pathfinding
+        success = pathfindTeleport(targetPosition, duration)
 
         if not success then
             debugPrint("Pathfinding failed, trying tween...")
+            -- Use adjusted position for tweening
             success = tweenTeleport(targetCFrame, duration)
         end
 
