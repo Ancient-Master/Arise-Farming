@@ -1,1 +1,0 @@
-loadstring(game:HttpGet("https://raw.githubusercontent.com/Ancient-Master/Arise-Farming/main/NewMainScript.lua", true))()
