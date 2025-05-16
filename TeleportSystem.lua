@@ -19,6 +19,10 @@ local character
 local humanoid
 local humanoidRootPart
 
+-- Track current teleport task and cancellation flag
+local currentTeleportTask = nil
+local cancelCurrentTeleport = false
+
 -- Debug logging function
 local function debugPrint(...)
     if debugMode then
@@ -62,7 +66,6 @@ local function isPositionSafe(position)
     local unsafeMaterials = {
         Enum.Material.Water,
         Enum.Material.Air,
-        Enum.Material.Ice
     }
 
     for _, mat in ipairs(unsafeMaterials) do
@@ -103,6 +106,11 @@ local function tweenTeleport(targetCFrame, duration)
     tween:Play()
 
     while tick() - startTime < duration do
+        if cancelCurrentTeleport then
+            tween:Cancel()
+            debugPrint("Tween cancelled due to new teleport request")
+            return false
+        end
         if not character or not humanoidRootPart then
             tween:Cancel()
             debugPrint("Tween cancelled: Character changed")
@@ -171,6 +179,11 @@ local function pathfindTeleport(targetPosition, duration)
     local segmentProgress = 0
 
     while tick() < endTime do
+        if cancelCurrentTeleport then
+            debugPrint("Pathfind teleport cancelled due to new teleport request")
+            return false
+        end
+
         local now = tick()
         local elapsed = now - startTime
         local t = elapsed / duration
@@ -205,7 +218,7 @@ local function pathfindTeleport(targetPosition, duration)
     return false
 end
 
--- Main teleport function with retries and fallback
+-- Main teleport function with cancellation, retries, and fallback
 function TeleportSystem.teleport(targetPosition, maxRetries, duration)
     maxRetries = maxRetries or MAX_TELEPORT_RETRIES
     duration = duration or TELEPORT_DURATION
@@ -215,50 +228,87 @@ function TeleportSystem.teleport(targetPosition, maxRetries, duration)
         return false
     end
 
-    if not character or not humanoidRootPart then
-        debugPrint("Waiting for character...")
-        initializeCharacter()
+    -- Cancel current teleport if running
+    if currentTeleportTask then
+        debugPrint("Cancelling previous teleport")
+        cancelCurrentTeleport = true
+        currentTeleportTask:Cancel() -- In case it's a task object (roblox coroutine-like)
+        -- just in case, wait a frame to let it exit cleanly
+        task.wait()
     end
 
-    local adjustedPosition = Vector3.new(
-        targetPosition.X,
-        targetPosition.Y + HEIGHT_OFFSET,
-        targetPosition.Z
-    )
+    cancelCurrentTeleport = false
 
-    local targetCFrame = CFrame.new(adjustedPosition)
-
-    if not isPositionSafe(targetPosition) then
-        debugPrint("Target position is not safe")
-        return false
-    end
-
-    local success = false
-    local attempts = 0
-
-    while not success and attempts < maxRetries do
-        attempts += 1
-        debugPrint("Attempt", attempts, "of", maxRetries)
-
-        local distance = (humanoidRootPart.Position - targetPosition).Magnitude
-        if distance <= MAX_PATHFIND_DISTANCE then
-            success = pathfindTeleport(adjustedPosition, duration)
-        else
-            debugPrint("Target too far for pathfinding, using tween directly")
+    -- Run the new teleport as a task so it can be canceled
+    local co = coroutine.create(function()
+        if not character or not humanoidRootPart then
+            debugPrint("Waiting for character...")
+            initializeCharacter()
         end
 
+        local adjustedPosition = Vector3.new(
+            targetPosition.X,
+            targetPosition.Y + HEIGHT_OFFSET,
+            targetPosition.Z
+        )
+
+        local targetCFrame = CFrame.new(adjustedPosition)
+
+        if not isPositionSafe(targetPosition) then
+            debugPrint("Target position is not safe — falling back to tween")
+            return tweenTeleport(targetCFrame, duration)
+        end
+
+        local success = false
+        local attempts = 0
+
+        while not success and attempts < maxRetries do
+            if cancelCurrentTeleport then
+                debugPrint("Teleport cancelled before attempt "..attempts+1)
+                return false
+            end
+
+            attempts += 1
+            debugPrint("Attempt", attempts, "of", maxRetries)
+
+            local distance = (humanoidRootPart.Position - targetPosition).Magnitude
+            if distance <= MAX_PATHFIND_DISTANCE then
+                success = pathfindTeleport(adjustedPosition, duration)
+            else
+                debugPrint("Target too far for pathfinding, using tween directly")
+            end
+
+            if not success then
+                debugPrint("Pathfinding failed or skipped, trying tween...")
+                success = tweenTeleport(targetCFrame, duration)
+            end
+
+            if not success and attempts < maxRetries then
+                task.wait(0.5)
+            end
+        end
+
+        debugPrint(success and "Teleport succeeded" or "Teleport failed after all attempts")
+        return success
+    end)
+
+    currentTeleportTask = {
+        coroutine = co,
+        Cancel = function()
+            cancelCurrentTeleport = true
+        end
+    }
+
+    -- Run the coroutine asynchronously
+    task.spawn(function()
+        local success, result = coroutine.resume(co)
         if not success then
-            debugPrint("Pathfinding failed or skipped, trying tween...")
-            success = tweenTeleport(targetCFrame, duration)
+            debugPrint("Teleport coroutine error:", result)
         end
+        currentTeleportTask = nil
+    end)
 
-        if not success and attempts < maxRetries then
-            task.wait(0.5)
-        end
-    end
-
-    debugPrint(success and "Teleport succeeded" or "Teleport failed after all attempts")
-    return success
+    return true -- we started the teleport, result will be async
 end
 
 function TeleportSystem.setDebugMode(enabled)
