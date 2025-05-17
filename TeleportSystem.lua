@@ -4,7 +4,7 @@ local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 
 local TeleportSystem = {}
-local debugMode = true -- Set to true to see console messages
+local debugMode = false -- Set to true to see console messages
 
 -- Configuration
 local TELEPORT_DURATION = 1.5
